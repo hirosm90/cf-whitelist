@@ -1,0 +1,79 @@
+#!/bin/sh
+
+#
+# Temporary directory and files
+#
+TEMPDIR=$(mktemp -d /tmp/cloudflare_XXXXX)
+trap "rm -rf $TEMPDIR" 0 1 2 3
+
+FILEDATE=`date "+%Y%m%d-%H%M%S"`
+IPV4FILE=$TEMPDIR/ipv4-$FILEDATE
+IPV6FILE=$TEMPDIR/ipv6-$FILEDATE
+
+curl -X GET "https://api.cloudflare.com/client/v4/ips" | jq -r '.result.ipv4_cidrs[]' > $IPV4FILE
+curl -X GET "https://api.cloudflare.com/client/v4/ips" | jq -r '.result.ipv6_cidrs[]' > $IPV6FILE
+
+#
+# IP address whitelist
+#
+ALLOWFILE=cloudflare-allow-$FILEDATE
+{
+    echo '# https://www.cloudflare.com/ips/'
+    echo -n "\n"
+    awk '{print "allow "$0";"}' $IPV4FILE
+    echo -n "\n"
+    echo '# IPv6'
+    awk '{print "allow "$0";"}' $IPV6FILE
+} 1> $TEMPDIR/$ALLOWFILE
+
+#
+# Real IP list
+#
+REALIPFILE=cloudflare-realip-$FILEDATE
+{
+    echo '# https://www.cloudflare.com/ips/'
+    echo -n "\n"
+    awk '{print "set_real_ip_from "$0";"}' $IPV4FILE
+    echo -n "\n"
+    echo '# IPv6'
+    awk '{print "set_real_ip_from "$0";"}' $IPV6FILE
+    echo 'real_ip_header CF-Connecting-IP;'
+} 1> $TEMPDIR/$REALIPFILE
+
+
+#
+# NGINX Configuration Directory and Files
+#
+ALLOWCONF=cloudflare-allow.conf
+NGINXCONFDIR=/etc/nginx
+
+IPDIR=$NGINXCONFDIR/ip
+mkdir -p $IPDIR
+
+#
+# Check if IP whitelist is current
+#
+diff -s $TEMPDIR/$ALLOWFILE $NGINXCONFDIR/$ALLOWCONF
+if [ $? -ne 0 ]; then
+  cp -f $TEMPDIR/$ALLOWFILE $IPDIR
+  ln -sf $IPDIR/$ALLOWFILE $NGINXCONFDIR/$ALLOWCONF
+  RELOAD=1
+fi
+
+#
+# Check if real IP list is current
+#
+REALIPCONF=cloudflare-realip.conf
+diff -s $TEMPDIR/$REALIPFILE $NGINXCONFDIR/$REALIPCONF
+if [ $? -ne 0 ]; then
+  cp -f $TEMPDIR/$REALIPFILE $IPDIR
+  ln -sf $IPDIR/$REALIPFILE $NGINXCONFDIR/$REALIPCONF
+  RELOAD=1
+fi
+
+#
+# Restart NGINX if necessary
+#
+if [ $RELOAD -ne 0 ]; then
+    systemctl restart nginx
+fi
