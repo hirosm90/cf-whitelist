@@ -1,2 +1,2 @@
 # cf-whitelist
-Create lists of Cloudflare proxy IPx 
+Create lists of Cloudflare proxy IPs
