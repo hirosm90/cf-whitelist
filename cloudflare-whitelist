@@ -49,6 +49,7 @@ NGINXCONFDIR=/etc/nginx
 
 IPDIR=$NGINXCONFDIR/ip
 mkdir -p $IPDIR
+RELOAD=0
 
 #
 # Check if IP whitelist is current
